@@ -1,5 +1,6 @@
 import pybullet as p
 import os
+import numpy as np
 
 
 class Goal:

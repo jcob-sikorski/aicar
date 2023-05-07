@@ -11,8 +11,8 @@ def main():
     agent = TRPOAgent(policy=nn)
 
     agent.load_model("driving/agent.pth")
-    agent.train("driving-v0", seed=0, batch_size=5000, iterations=200,
-                max_episode_length=250, verbose=True)
+    agent.train("driving-v0", seed=0, batch_size=5000, iterations=50,
+                max_episode_length=1000, verbose=True)
     agent.save_model("agent.pth")
 
     env = gymnasium.make('driving-v0')

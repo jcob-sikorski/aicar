@@ -4,6 +4,7 @@ import math
 import pybullet as p
 from driving.resources.car import Car
 from driving.resources.plane import Plane
+from driving.resources.obstacle import Obstacle
 from driving.resources.goal import Goal
 import matplotlib.pyplot as plt
 
@@ -67,12 +68,21 @@ class DrivingEnv(gym.Env):
         Plane(self.client)
         self.car = Car(self.client)
 
-        # Set the goal to a random target
-        x = (self.np_random.uniform(5, 9) if self.np_random.integers(low=0, high=2) else
-             self.np_random.uniform(-9, -5))
-        y = (self.np_random.uniform(5, 9) if self.np_random.integers(low=0, high=2) else
-             self.np_random.uniform(-9, -5))
-        self.goal = (x, y)
+        #******************************
+        np.random.seed(42)
+
+        # Define the locations and dimensions of the buildings
+        buildings = np.random.uniform(low=-10, high=10, size=(31, 2))
+
+        for b in buildings[:-1]:
+            self.done = False
+
+            # Visual element of the goal
+            Obstacle(self.client, (b[0], b[1]))
+
+        #******************************
+
+        self.goal = (buildings[-1][0], buildings[-1][1])
         self.done = False
 
         # Visual element of the goal
