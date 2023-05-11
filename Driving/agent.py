@@ -8,7 +8,10 @@ from copy import deepcopy
 from torch.nn.utils.convert_parameters import parameters_to_vector
 from torch.nn.utils.convert_parameters import vector_to_parameters
 
+# TODO instead of TRPO use PPO from pytorch
 
+# TRPO is not a neural network architecture for a policy, but rather an algorithm 
+# that can be used to train a neural network policy for a given task.
 class TRPOAgent:
     """Continuous TRPO agent."""
 
@@ -244,13 +247,26 @@ class TRPOAgent:
 
         # Begin training
         observation = env.reset()
+
+        # Iteration: An iteration is one step of the optimizer that updates 
+        # the model parameters. In each iteration, a batch of training examples 
+        # is processed and the gradients are computed to update the weights of the model.
         for iteration in range(iterations):
             # Set initial value to 0
             recording['num_episodes_in_iteration'].append(0)
 
+            # Batch: A batch is a subset of the training dataset that is used 
+            # in one iteration of the optimizer. The size of the batch is determined 
+            # by the batch size hyperparameter. Larger batch sizes can lead to 
+            # faster convergence, but require more memory.
             for step in range(batch_size):
                 # Take step with agent
                 observation, reward, done, _ = env.step(self(observation))
+
+                # Episode: In reinforcement learning, an episode is a sequence of states, 
+                # actions, and rewards that start from an initial state and end in a 
+                # terminal state. The goal of the agent is to learn a policy that maximizes 
+                # the expected cumulative reward over a sequence of episodes.
 
                 # Recording, increment episode values
                 recording['episode_length'][-1] += 1

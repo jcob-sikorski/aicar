@@ -1,14 +1,16 @@
 import pybullet as p
 import os
 import math
+from functools import reduce
+import operator
 
 
 class Car:
-    def __init__(self, client):
+    def __init__(self, client, base):
         self.client = client
         f_name = os.path.join(os.path.dirname(__file__), 'car.urdf')
         self.car = p.loadURDF(fileName=f_name,
-                              basePosition=[0, 0, 0.1],
+                              basePosition=[base[0], base[1], 0.1],
                               physicsClientId=client)
 
         # Joint indices as found by p.getJointInfo()
@@ -63,11 +65,43 @@ class Car:
         pos, ang = p.getBasePositionAndOrientation(self.car, self.client)
         ang = p.getEulerFromQuaternion(ang)
         ori = (math.cos(ang[2]), math.sin(ang[2]))
-        pos = pos[:2]
+
+        # TODO test if rays report tru positions of boxes
+        rayFrom = []
+        rayTo = []
+
+        numRays = 10
+        rayLen = 20
+
+        # specify locations of each ray end
+        for i in range(numRays):
+            rayFrom.append(list(pos))
+            rayTo.append([
+                rayLen * math.sin(2. * math.pi * float(i) / numRays),
+                rayLen * math.cos(2. * math.pi * float(i) / numRays), 1
+            ])
+
+        # TODO is LiDAR necessary or preknown pos of boxes will suffice?
+        results = p.rayTestBatch(rayFrom, rayTo)
+
+        hits = []
+         # check for hits
+        for i in range(numRays):
+            hitObjectUid = results[i][0]
+
+            if (hitObjectUid >= 0):
+                hitPosition = results[i][3] # DEBUG
+                hits.append(hitPosition)
+            else:
+                hits.append((0, 0, 0))
+             
+
         # Get the velocity of the car
         vel = p.getBaseVelocity(self.car, self.client)[0][0:2]
 
-        # Concatenate position, orientation, velocity
-        observation = (pos + ori + vel)
+        pos = pos[:2]
+
+        # Concatenate position, orientation, velocity, 10 hits ((0, 0, 0) means no hit)
+        observation = (pos + ori + vel + reduce(operator.concat, hits))
 
         return observation
