@@ -66,12 +66,11 @@ class Car:
         ang = p.getEulerFromQuaternion(ang)
         ori = (math.cos(ang[2]), math.sin(ang[2]))
 
-        # TODO test if rays report tru positions of boxes
         rayFrom = []
         rayTo = []
 
-        numRays = 10
-        rayLen = 20
+        numRays = 100
+        rayLen = 100
 
         # specify locations of each ray end
         for i in range(numRays):
@@ -101,7 +100,7 @@ class Car:
 
         pos = pos[:2]
 
-        # Concatenate position, orientation, velocity, 10 hits ((0, 0, 0) means no hit)
+        # Concatenate position, orientation, velocity, 100 hits ((0, 0, 0) means no hit)
         observation = (pos + ori + vel + reduce(operator.concat, hits))
 
         return observation

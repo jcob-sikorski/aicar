@@ -16,10 +16,9 @@ class DrivingEnv(gym.Env):
         self.action_space = gym.spaces.box.Box(
             low=np.array([0, -.6], dtype=np.float32),
             high=np.array([1, .6], dtype=np.float32))
-        # TODO change observation space to include data from positions of boxes
         self.observation_space = gym.spaces.box.Box(
-            low=np.array([-10, -10, -1, -1, -5, -5, -10, -10], dtype=np.float32),
-            high=np.array([10, 10, 1, 1, 5, 5, 10, 10], dtype=np.float32))
+            low=np.array([-10, -10, -1, -1, -5, -5, -10, -10] + [-10 for _ in range(300)], dtype=np.float32),
+            high=np.array([10, 10, 1, 1, 5, 5, 10, 10] + [10 for _ in range(300)], dtype=np.float32))
         self.np_random, _ = gym.utils.seeding.np_random()
 
         self.client = p.connect(p.DIRECT)
@@ -49,8 +48,6 @@ class DrivingEnv(gym.Env):
                                   (car_ob[1] - car_ob[i:i+3][1]) ** 2))
                                   for i in range(3, len(car_ob), 3)]
 
-        # TODO test a collision with a box
-
         # Compute reward as L2 change in distance to a goal
         dist_to_goal = math.sqrt(((car_ob[0] - self.goal[0]) ** 2 +
                                   (car_ob[1] - self.goal[1]) ** 2))
@@ -61,7 +58,7 @@ class DrivingEnv(gym.Env):
         if (car_ob[0] >= 10 or car_ob[0] <= -10 or
                 car_ob[1] >= 10 or car_ob[1] <= -10):
             self.done = True
-            reward = -20
+            reward = -1
         # Done by reaching a goal
         elif dist_to_goal < 1:
             self.done = True
@@ -69,7 +66,7 @@ class DrivingEnv(gym.Env):
         # Done by hitting a box
         elif any(num <= 0.3 for num in dist_to_box):
             self.done = True
-            reward = -50
+            reward = -1
 
         ob = np.array(car_ob[:6] + tuple(self.goal) + car_ob[6:], dtype=np.float32)
         return ob, reward, self.done, dict()
@@ -84,8 +81,6 @@ class DrivingEnv(gym.Env):
 
         # Reload the plane and car
         Plane(self.client)
-
-        # TODO test randomizing the starting position of the player and the goal for each episode
 
         # TODO create a clear way to specify the environment - number of boxes and the seed
         # seed for environment creation
@@ -113,9 +108,9 @@ class DrivingEnv(gym.Env):
                 break
 
         car_pos = (0, 0)
-        # Generate a new goal position until it is different from all the building positions
+        # Generate a new car position until it is different from all the building positions
         while True:
-            # Generate a new random position for the goal
+            # Generate a new random position for the car
             car_pos = rg.uniform(low=-10, high=10, size=(1, 2))[0]
 
             if not any(math.sqrt((b_pos[0] - car_pos[0]) ** 2 +

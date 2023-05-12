@@ -4,3 +4,8 @@
 /Driving/PPO-agent.py
 /Driving/RayTestBatchDemo.py
 /Driving/test.py
+/Driving/agentLSTM.py
+/Driving/AgentTRPO.py
+/Driving/mainTRPO.py
+/PPO_logs
+/PPO_preTrained
