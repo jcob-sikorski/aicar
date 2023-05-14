@@ -1,4 +1,4 @@
-import gymnasium as gym
+import gym
 import numpy as np
 import math
 import pybullet as p
@@ -8,7 +8,7 @@ from driving.resources.obstacle import Obstacle
 from driving.resources.goal import Goal
 import matplotlib.pyplot as plt
 
-
+# TODO add parallelism to train faster the model
 class DrivingEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
@@ -58,15 +58,15 @@ class DrivingEnv(gym.Env):
         if (car_ob[0] >= 10 or car_ob[0] <= -10 or
                 car_ob[1] >= 10 or car_ob[1] <= -10):
             self.done = True
-            reward = -1
+            reward = -10
         # Done by reaching a goal
         elif dist_to_goal < 1:
             self.done = True
-            reward = 100
+            reward = 50
         # Done by hitting a box
         elif any(num <= 0.3 for num in dist_to_box):
             self.done = True
-            reward = -1
+            reward = -10
 
         ob = np.array(car_ob[:6] + tuple(self.goal) + car_ob[6:], dtype=np.float32)
         return ob, reward, self.done, dict()
@@ -88,7 +88,7 @@ class DrivingEnv(gym.Env):
 
         # Define the locations and dimensions of the buildings
         building_pos = np.random.uniform(low=-10, high=10, size=(10, 2))
-
+        # TODO does whole simulation needs to be reseted or only the position of the goal and the car may be changed
         for b in building_pos[:-1]:
             self.done = False
 
@@ -96,12 +96,13 @@ class DrivingEnv(gym.Env):
             Obstacle(self.client, (b[0], b[1]))
 
         # omit the seed
-        rg = np.random.default_rng()
+        # rg = np.random.default_rng()
 
         # Generate a new goal position until it is different from all the building positions
         while True:
             # Generate a new random position for the goal
-            self.goal = rg.uniform(low=-10, high=10, size=(1, 2))[0].astype(np.float32)
+            # self.goal = rg.uniform(low=-10, high=10, size=(1, 2))[0].astype(np.float32)
+            self.goal = np.random.randint(0, 10, size=2)
 
             if not any(math.sqrt((b_pos[0] - self.goal[0]) ** 2 + 
                         (b_pos[1] - self.goal[1]) ** 2) <= 1 for b_pos in building_pos):
@@ -111,7 +112,8 @@ class DrivingEnv(gym.Env):
         # Generate a new car position until it is different from all the building positions
         while True:
             # Generate a new random position for the car
-            car_pos = rg.uniform(low=-10, high=10, size=(1, 2))[0]
+            # car_pos = rg.uniform(low=-10, high=10, size=(1, 2))[0]
+            car_pos = np.random.randint(-10, 10, size=2)
 
             if not any(math.sqrt((b_pos[0] - car_pos[0]) ** 2 +
                     (b_pos[1] - car_pos[1]) ** 2) <= 1 for b_pos in building_pos):
@@ -126,10 +128,10 @@ class DrivingEnv(gym.Env):
 
         # Get observation to return
         car_ob = self.car.get_observation()
-
+        
         self.prev_dist_to_goal = math.sqrt(((car_ob[0] - self.goal[0]) ** 2 +
                                            (car_ob[1] - self.goal[1]) ** 2))
-
+        
         return np.array(car_ob[:6] + tuple(self.goal) + car_ob[6:], dtype=np.float32)
 
     def render(self, mode='human'):
@@ -146,8 +148,8 @@ class DrivingEnv(gym.Env):
 
         # Rotate camera direction
         rot_mat = np.array(p.getMatrixFromQuaternion(ori)).reshape(3, 3)
-        camera_vec = np.matmul(rot_mat, [1, -1, 0])
-        up_vec = np.matmul(rot_mat, np.array([0, 0, 3]))
+        camera_vec = np.matmul(rot_mat, [1, 0, 0])
+        up_vec = np.matmul(rot_mat, np.array([0, 0, 1]))
         view_matrix = p.computeViewMatrix(pos, pos + camera_vec, up_vec)
 
         # Display image
