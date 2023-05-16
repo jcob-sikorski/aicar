@@ -2,13 +2,17 @@
 
 This project simulates an AI-controlled car navigating through a randomly generated environment consisting of obstacles and a green rectangle representing the goal. The car is equipped with sensors that provide information about the distance to the obstacles, which is then used by an AI algorithm to control the car.
 
-<img width="640" alt="img" src="https://user-images.githubusercontent.com/45105669/236634928-76af8f75-f135-45c9-95d7-2f9bc10fb377.png">
+<img width="1440" alt="Screen Shot 2023-05-16 at 6 04 07 PM" src="https://github.com/jcob-sikorski/aicar/assets/45105669/e8306068-c960-4a97-afeb-70da85ab423c">
+
 
 ## Requirements
 
 - Python 3.6 or later
 - PyBullet physics engine
 - OpenAI Gym
+- stable_baselines3
+- numpy
+- opencv
 
 ## Installation
 
