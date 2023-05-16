@@ -1,17 +1,20 @@
 import pybullet as p
 import os
 import math
-from functools import reduce
-import operator
+import numpy as np
 
 
 class Car:
-    def __init__(self, client, base):
+    def __init__(self, client, base, orientation=0):
         self.client = client
+        self.orientation = orientation
+        # Convert the orientation angle to a quaternion
+        self.orientation_quat = p.getQuaternionFromEuler([0, 0, self.orientation])
         f_name = os.path.join(os.path.dirname(__file__), 'car.urdf')
         self.car = p.loadURDF(fileName=f_name,
                               basePosition=[base[0], base[1], 0.1],
-                              physicsClientId=client)
+                              physicsClientId=client,
+                              baseOrientation=self.orientation_quat)
 
         # Joint indices as found by p.getJointInfo()
         self.steering_joints = [3, 5]
@@ -32,8 +35,8 @@ class Car:
         throttle, steering_angle = action
 
         # Clip throttle and steering angle to reasonable values
-        throttle = min(max(throttle, 0), 1)
-        steering_angle = max(min(steering_angle, 0.6), -0.6)
+        throttle = min(max(throttle, 1), 1.5)
+        steering_angle = max(min(steering_angle, 135), -135)
 
         # Set the steering joint positions
         p.setJointMotorControlArray(self.car, self.steering_joints,
@@ -60,47 +63,61 @@ class Car:
             forces=[1.2] * 4,
             physicsClientId=self.client)
 
-    def get_observation(self):
+    def get_observation(self, goal):
         # Get the position and orientation of the car in the simulation
         pos, ang = p.getBasePositionAndOrientation(self.car, self.client)
         ang = p.getEulerFromQuaternion(ang)
         ori = (math.cos(ang[2]), math.sin(ang[2]))
 
-        rayFrom = []
-        rayTo = []
+        # Define camera parameters
+        width = 320  # Width of the camera image
+        height = 240  # Height of the camera image
+        fov = 60  # Field of view of the camera
+        aspect_ratio = width / height
+        near_plane = 0.1  # Near clipping plane
+        far_plane = 100  # Far clipping plane
 
-        numRays = 100
-        rayLen = 100
+        # Define camera position and orientation
+        cam_target = (pos[0] + ori[0], pos[1] + ori[1], pos[2])
+        view_matrix = p.computeViewMatrix(
+            cameraEyePosition=pos,
+            cameraTargetPosition=cam_target,
+            cameraUpVector=(0, 0, 1)
+        )
 
-        # specify locations of each ray end
-        for i in range(numRays):
-            rayFrom.append(list(pos))
-            rayTo.append([
-                rayLen * math.sin(2. * math.pi * float(i) / numRays),
-                rayLen * math.cos(2. * math.pi * float(i) / numRays), 1
-            ])
+        # Define the projection matrix
+        projection_matrix = p.computeProjectionMatrixFOV(
+            fov=fov,
+            aspect=aspect_ratio,
+            nearVal=near_plane,
+            farVal=far_plane
+        )
 
-        # TODO is LiDAR necessary or preknown pos of boxes will suffice?
-        results = p.rayTestBatch(rayFrom, rayTo)
+        # Get the camera image
+        img_arr = p.getCameraImage(
+            width=width,
+            height=height,
+            viewMatrix=view_matrix,
+            projectionMatrix=projection_matrix,
+            renderer=p.ER_BULLET_HARDWARE_OPENGL
+        )
 
-        hits = []
-         # check for hits
-        for i in range(numRays):
-            hitObjectUid = results[i][0]
-
-            if (hitObjectUid >= 0):
-                hitPosition = results[i][3] # DEBUG
-                hits.append(hitPosition)
-            else:
-                hits.append((0, 0, 0))
-             
+        # Extract the RGB image from the returned data
+        rgb_image = np.reshape(
+            np.array(img_arr[2], dtype=np.uint8),
+            (height, width, 4)
+        )[:, :, :3]
 
         # Get the velocity of the car
         vel = p.getBaseVelocity(self.car, self.client)[0][0:2]
 
-        pos = pos[:2]
+        dist_to_goal = math.sqrt(((pos[0] - goal[0]) ** 2 +
+                                  (pos[1] - goal[1]) ** 2))
 
-        # Concatenate position, orientation, velocity, 100 hits ((0, 0, 0) means no hit)
-        observation = (pos + ori + vel + reduce(operator.concat, hits))
+        # Create a dictionary for observation
+        observation = {
+            'image': rgb_image,
+            'vector': pos + ori + vel + tuple([dist_to_goal])
+        }
 
         return observation

@@ -10,6 +10,14 @@ class Obstacle:
         else:
             f_name = os.path.join(os.path.dirname(__file__), 'obstacle2.urdf')
             
-        p.loadURDF(fileName=f_name,
+        self.obstacle = p.loadURDF(fileName=f_name,
                    basePosition=[base[0], base[1], 0],
                    physicsClientId=client)
+        
+        self.pos = base
+
+    def get_id(self):
+        return self.obstacle
+    
+    def get_pos(self):
+        return self.pos
