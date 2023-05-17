@@ -18,7 +18,7 @@ from stable_baselines3 import PPO
 model = PPO(CustomPolicy, "driving-v0", verbose=1, n_steps=10000, ent_coef=0.2)
 model.learn(1)
 # TODO tune the hyperparamters, rewards, experiment with ranges of angle and velocity
-vec_env = model.get_env()
+vec_env = model.get_env() # TODO stuck and power intensive when doing this
 # mean_reward, std_reward = evaluate_policy(model, vec_env, n_eval_episodes=20, warn=False)
 # print(mean_reward)
 

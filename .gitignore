@@ -1,3 +1,4 @@
 .vscode
 Driving/test.py
 venv
+*.pyc

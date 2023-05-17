@@ -7,8 +7,11 @@ from driving.resources.plane import Plane
 from driving.resources.obstacle import Obstacle
 from driving.resources.goal import Goal
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 from gym.spaces import Dict, Box
 import cv2
+import time
+from IPython.display import clear_output
 
 # TODO add parallelism to train faster the model
 
@@ -81,7 +84,38 @@ class DrivingEnv(gym.Env):
         self.rendered_img = None
         self.render_rot_matrix = None
         self.timestep = 0
+        self.reward_tracking = {
+            'turning': 0,
+            'obstacle\navoidance': 0,
+            'green\npixels': 0,
+            'boundary\npenalty': 0,
+            'goal\nreward': 0,
+            'collision\npenalty': 0,
+            'blue\npixels': 0,
+            'distance\npenalty':0
+        }
         # self.reset()
+        self.fig, self.axs = plt.subplots(1, 2)  # Create a 1x2 subplot grid
+        self.rendered_img = None
+        self.reward_bar = None
+        self.reward_types = list(self.reward_tracking.keys())
+        self.reward_bar_heights = np.zeros(len(self.reward_types))
+
+
+    def plot_rewards(self):
+        if self.reward_bar is None:
+            self.reward_bar = self.axs[1].bar(self.reward_types, self.reward_bar_heights)
+            self.axs[1].set_yscale('symlog')  # Set symlog scale with base 10
+            self.axs[1].set_xticklabels(self.reward_types, fontsize=8)  # Increase fontsize here
+            self.fig.tight_layout()
+        else:
+            for i, reward_type in enumerate(self.reward_types):
+                self.reward_bar_heights[i] = self.reward_tracking[reward_type]
+            for bar, height in zip(self.reward_bar, self.reward_bar_heights):
+                bar.set_height(height)
+            self.axs[1].relim()
+            self.axs[1].autoscale_view()
+
 
     def step(self, action):
         # Feed action to the car and get observation of a car's state
@@ -89,10 +123,21 @@ class DrivingEnv(gym.Env):
         p.stepSimulation()
         car_ob = self.car.get_observation(self.goal)
 
+        reward = 0
+
         # Compute reward as L2 change in distance to a goal
         dist_to_goal = car_ob['vector'][7]
-        # reward = max(self.prev_dist_to_goal - dist_to_goal, 0)
-        reward = 0
+        # Add a penalty if the car is getting further away from the goal
+        if dist_to_goal > self.prev_dist_to_goal:
+            distance_penalty = (dist_to_goal - self.prev_dist_to_goal) * 500  # You can adjust the scaling factor
+            reward -= distance_penalty
+            self.reward_tracking['distance\npenalty'] = -distance_penalty
+            turning_reward = abs(action[1]) * 20
+            reward += turning_reward # small reward for turning
+            self.reward_tracking['turning'] = turning_reward
+        else:
+            self.reward_tracking['distance\npenalty'] = 0
+
         self.prev_dist_to_goal = dist_to_goal
         car_pos = car_ob['vector'][:2]
 
@@ -101,22 +146,28 @@ class DrivingEnv(gym.Env):
         # When car has the clear way to the box it corrctly goes to it
         # When car has the boxes in the way to the goal it tries to avoid them but not sufficiently.
         # Reward for turning
-        reward += abs(action[1])  # small reward for turning
-        # TODO chart the rewards in real time as columns with names under them
-        # TODO examine what exaclty numbers of steering angle mean - what is the max what is the min
-        # Penalty for driving straight
-        # steering_angle = action[1]
-        # if abs(steering_angle) < 5:  # adjust the threshold as needed
-        #     reward -= 10  # adjust the penalty as needed
 
-        # Add reward based on the angle to the goal
-        car_ori = car_ob['vector'][2:4]
-        goal_pos = self.goal
-        direction_vec = goal_pos - car_pos
-        cos_angle = np.dot(car_ori, direction_vec) / (np.linalg.norm(car_ori) * np.linalg.norm(direction_vec))
-        angle_to_goal = math.acos(cos_angle)
-        angle_reward = 1 - angle_to_goal / math.pi  # Normalize the angle reward to be between 0 and 1
-        reward += angle_reward*10
+        # TODO the model should not be penalized for driving into a green box
+
+        # TODO for avoiding the obtacles we can use the same logic for blue boxes as for green box
+        # Define lower and upper bounds for the green color
+        # Define lower and upper bounds for the blue color
+        lower_blue = np.array([0, 0, 120])
+        upper_blue = np.array([100, 100, 255])
+
+        # TODO add a penalty for being more far away from the goal than previously it should be bigger than turning reward
+
+        # Create a mask that only allows the blue range
+        mask = cv2.inRange(car_ob['image'], lower_blue, upper_blue)
+
+        # Calculate the ratio of blue pixels to total pixels
+        ratio_blue = cv2.countNonZero(mask) / (car_ob['image'].size / 3)
+        reward -= ratio_blue * 50
+        self.reward_tracking['blue\npixels'] = -ratio_blue * 60
+        if ratio_blue > 100:
+            turning_reward = abs(action[1]) * 100
+            reward += turning_reward # small reward for turning
+            self.reward_tracking['turning'] = turning_reward
 
         # Add obstacle avoidance reward
         for obstacle in self.obstacles:
@@ -124,6 +175,7 @@ class DrivingEnv(gym.Env):
             dist_to_obstacle = np.linalg.norm(car_pos - obstacle_pos)
             if dist_to_obstacle < 1:
                 reward -= (1 / dist_to_obstacle)*10  # You can adjust the scaling factor if needed
+                self.reward_tracking['obstacle\navoidance'] = -1 / dist_to_obstacle*10 if dist_to_obstacle < 1 else 0
 
         # Define lower and upper bounds for the green color
         lower_green = np.array([0, 120, 0])
@@ -131,23 +183,23 @@ class DrivingEnv(gym.Env):
 
         # Create a mask that only allows the green range
         mask = cv2.inRange(car_ob['image'], lower_green, upper_green)
-
-        # TODO car constantly sees its own green wheels!
-        # TODO see what the model sees
         
         # Calculate the ratio of green pixels to total pixels
         ratio_green = cv2.countNonZero(mask) / (car_ob['image'].size / 3)
         reward += ratio_green * 1000
+        self.reward_tracking['green\npixels'] = ratio_green * 1000
 
         # Done by running off the boundaries
         if (car_ob['vector'][0] >= 15 or car_ob['vector'][0] <= -5 or
                 car_ob['vector'][1] >= 15 or car_ob['vector'][1] <= -5):
             self.done = True
             reward = -50
+            self.reward_tracking['boundary\npenalty'] = -50
         # Done by reaching a goal
         elif dist_to_goal < 1:
             self.done = True
             reward = 100
+            self.reward_tracking['goal\nreward'] = 100
         # Done by hitting a box
         car_id = self.car.get_ids()[0]
         for obstacle in self.obstacles:
@@ -155,11 +207,15 @@ class DrivingEnv(gym.Env):
                 self.done = True
                 reward = -50
                 break
-        self.timestep += 1
-        print(self.timestep, car_ob['vector'][7], reward)
-        self.render()
-        return car_ob, reward, self.done, dict()
+            self.reward_tracking['collision\npenalty'] = -50 if self.done else 0
 
+        self.timestep += 1
+        print(self.timestep, reward)
+        # self.render()
+        # self.plot_rewards()
+        # plt.pause(0.0001)  # you can adjust this value as needed
+        return car_ob, reward, self.done, dict()
+    
     def seed(self, seed=None):
         self.np_random, seed = gym.utils.seeding.np_random(seed)
         return [seed]
@@ -226,7 +282,7 @@ class DrivingEnv(gym.Env):
 
     def render(self, mode='human'):
         if self.rendered_img is None:
-            self.rendered_img = plt.imshow(np.zeros((100, 100, 4)))
+            self.rendered_img = self.axs[0].imshow(np.zeros((100, 100, 4)))
 
         # Base information
         car_id, client_id = self.car.get_ids()
@@ -246,8 +302,8 @@ class DrivingEnv(gym.Env):
         frame = p.getCameraImage(100, 100, view_matrix, proj_matrix)[2]
         frame = np.reshape(frame, (100, 100, 4))
         self.rendered_img.set_data(frame)
-        plt.draw()
-        plt.pause(.00001)
+        self.axs[0].draw_artist(self.rendered_img)
+        self.fig.canvas.blit(self.axs[0].bbox)
 
     def close(self):
         p.disconnect(self.client)
