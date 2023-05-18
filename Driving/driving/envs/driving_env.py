@@ -170,12 +170,12 @@ class DrivingEnv(gym.Env):
             self.reward_tracking['turning'] = turning_reward
 
         # Add obstacle avoidance reward
-        for obstacle in self.obstacles:
+        for obstacle in self.obstacles[:-1]:
             obstacle_pos = np.array(obstacle.get_pos())
             dist_to_obstacle = np.linalg.norm(car_pos - obstacle_pos)
-            if dist_to_obstacle < 1:
-                reward -= (1 / dist_to_obstacle)*10  # You can adjust the scaling factor if needed
-                self.reward_tracking['obstacle\navoidance'] = -1 / dist_to_obstacle*10 if dist_to_obstacle < 1 else 0
+            # if dist_to_obstacle < 1:
+            reward -= (1 / dist_to_obstacle)*10  # You can adjust the scaling factor if needed
+            self.reward_tracking['obstacle\navoidance'] = -1 / dist_to_obstacle*10
 
         # Define lower and upper bounds for the green color
         lower_green = np.array([0, 120, 0])
@@ -202,7 +202,7 @@ class DrivingEnv(gym.Env):
             self.reward_tracking['goal\nreward'] = 100
         # Done by hitting a box
         car_id = self.car.get_ids()[0]
-        for obstacle in self.obstacles:
+        for obstacle in self.obstacles[:-1]:
             if p.getContactPoints(car_id, obstacle.get_id(), physicsClientId=self.client):
                 self.done = True
                 reward = -50
@@ -210,10 +210,7 @@ class DrivingEnv(gym.Env):
             self.reward_tracking['collision\npenalty'] = -50 if self.done else 0
 
         self.timestep += 1
-        print(self.timestep, reward)
-        # self.render()
-        # self.plot_rewards()
-        # plt.pause(0.0001)  # you can adjust this value as needed
+        # print(self.timestep, reward)
         return car_ob, reward, self.done, dict()
     
     def seed(self, seed=None):
@@ -280,7 +277,7 @@ class DrivingEnv(gym.Env):
         # Get observation to return
         return self.car.get_observation(self.goal)
 
-    def render(self, mode='human'):
+    def render(self, mode='human'):        
         if self.rendered_img is None:
             self.rendered_img = self.axs[0].imshow(np.zeros((100, 100, 4)))
 
@@ -304,6 +301,9 @@ class DrivingEnv(gym.Env):
         self.rendered_img.set_data(frame)
         self.axs[0].draw_artist(self.rendered_img)
         self.fig.canvas.blit(self.axs[0].bbox)
+
+        self.plot_rewards()
+        plt.pause(0.0001)  # you can adjust this value as needed
 
     def close(self):
         p.disconnect(self.client)

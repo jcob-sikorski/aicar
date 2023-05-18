@@ -32,7 +32,7 @@ class Car:
 
     def apply_action(self, action):
         # Expects action to be two dimensional
-        throttle, steering_angle = action
+        throttle, steering_angle = action[0], action[1]
 
         # Clip throttle and steering angle to reasonable values
         throttle = min(max(throttle, 1), 1.5)
