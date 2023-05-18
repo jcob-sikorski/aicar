@@ -1,89 +1,59 @@
+# Import the required libraries and modules
 import gym
 import numpy as np
 import math
 import pybullet as p
+import matplotlib.pyplot as plt
+import cv2
+from gym.spaces import Box
 from driving.resources.car import Car
 from driving.resources.plane import Plane
 from driving.resources.obstacle import Obstacle
 from driving.resources.goal import Goal
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-from gym.spaces import Dict, Box
-import cv2
-import time
-from IPython.display import clear_output
-
-# TODO add parallelism to train faster the model
-
-# 1. Reward turning actions: You could give a small positive reward for turning actions. 
-# This will encourage the car to explore turning actions more often. 
-# However, be careful to balance this correctly; if the reward for turning is too high, 
-# the car might just spin in circles.
-
-# 2. Penalize straight-line driving: Similar to the above, but instead of rewarding turns, 
-# you penalize driving straight. This will encourage the car to explore and
-#  learn how to navigate with turns more often. Be careful with the balance here 
-# too; if the penalty is too high, the car might avoid driving straight even 
-# when it's the best action.
-
-# 3. Add rewards based on the angle to the goal: Instead of just rewarding
-# based on distance to the goal, you could also add a reward based on the angle 
-# to the goal. If the car is facing the goal directly, it gets a higher reward.
-#  This will encourage the car to turn towards the goal more often.
-
-# 4. Add rewards based on obstacle avoidance: You could also add a reward 
-# based on how well the car avoids obstacles. For example, if the car turns to 
-# avoid an obstacle, it gets a reward. This would encourage the car to 
-# turn more often, especially in situations where there are obstacles.
-
-# 5. You could modify the reward function in your step method to include a 
-# reward for how much green the car sees in the current observation. 
-# This would encourage the car to drive towards the green goal:
-
-# This will provide the agent with a higher reward 
-# the more green it sees, thereby encouraging it to drive towards 
-# the green box. Note that the range for the green color in the 
-# calculate_green function might need to be adjusted based on the 
-# actual color values of the green box in your environment. 
-# Also, it's important to remember that the color range is defined 
-# in BGR format, not RGB.
-
 
 
 class DrivingEnv(gym.Env):
+    """
+    Driving environment for a Gym-styled reinforcement learning environment.
+    This environment simulates a car driving experience with obstacles.
+    """
     metadata = {'render.modes': ['human']}
 
     def __init__(self):
+        """
+        Initialize the driving environment.
+        """
+        # Action space of the car consists of throttle and steering angle
+        # Note: Check the bounds of throttle and angle
         self.action_space = Box(
             low=np.array([1, -135], dtype=np.float32),
             high=np.array([1.5, 135], dtype=np.float32))
-        
+
+        # Observation space of the car consists of RGB image
         img_height = 240
         img_width = 320
         img_channels = 3
-        img_space = Box(low=0, high=255, shape=(img_height, img_width, img_channels), dtype=np.uint8)
-        
-        vector_space = Box(low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32)
-        
-        self.observation_space = Dict({
-            'image': img_space,
-            'vector': vector_space
-        })
+        self.observation_space = Box(low=0, high=255, 
+                                     shape=(img_height, img_width, img_channels), 
+                                     dtype=np.uint8)
+
         self.np_random, _ = gym.utils.seeding.np_random()
 
+        # Initialize PyBullet client
         self.client = p.connect(p.DIRECT)
 
-        # Reduce length of episodes for RL algorithms
+        # Set the timestep to reduce length of episodes for RL algorithms
         p.setTimeStep(1/30, self.client)
 
+        # Initialize car and goal
         self.car = None
         self.goal = None
         self.obstacles = []
         self.done = False
         self.prev_dist_to_goal = 0
-        self.rendered_img = None
-        self.render_rot_matrix = None
         self.timestep = 0
+
+        # Initialize reward tracking
         self.reward_tracking = {
             'turning': 0,
             'obstacle\navoidance': 0,
@@ -94,7 +64,8 @@ class DrivingEnv(gym.Env):
             'blue\npixels': 0,
             'distance\npenalty':0
         }
-        # self.reset()
+
+        # Initialize figure for rendering environment
         self.fig, self.axs = plt.subplots(1, 2)  # Create a 1x2 subplot grid
         self.rendered_img = None
         self.reward_bar = None
@@ -103,6 +74,9 @@ class DrivingEnv(gym.Env):
 
 
     def plot_rewards(self):
+        """
+        Plot the rewards during training.
+        """
         if self.reward_bar is None:
             self.reward_bar = self.axs[1].bar(self.reward_types, self.reward_bar_heights)
             self.axs[1].set_yscale('symlog')  # Set symlog scale with base 10
@@ -118,175 +92,209 @@ class DrivingEnv(gym.Env):
 
 
     def step(self, action):
-        # Feed action to the car and get observation of a car's state
+        """
+        Perform an action in the environment and return the next state, the reward and whether the state is terminal.
+
+        Parameters
+        ----------
+        action : np.array
+            Action to be performed.
+
+        Returns
+        -------
+        image : np.array
+            The observation after performing the action.
+        reward : float
+            The reward achieved by performing the action.
+        self.done : bool
+            Whether the episode has ended.
+        info : dict
+            Extra information, currently empty.
+        """
+
+        # Feed the action to the car and step the simulation
         self.car.apply_action(action)
         p.stepSimulation()
-        car_ob = self.car.get_observation(self.goal)
 
+        # Retrieve the car's position and orientation from the simulation
+        car_id, client_id = self.car.get_ids()
+        car_pos, ang = p.getBasePositionAndOrientation(car_id, client_id)
+        ang = p.getEulerFromQuaternion(ang)
+
+        # Compute the distance to the goal
+        dist_to_goal = math.sqrt(((car_pos[0] - self.goal[0]) ** 2 + (car_pos[1] - self.goal[1]) ** 2))
+
+        # Obtain the observation image
+        image = self.car.get_observation(self.goal)
+
+        # Initialize reward
         reward = 0
 
-        # Compute reward as L2 change in distance to a goal
-        dist_to_goal = car_ob['vector'][7]
-        # Add a penalty if the car is getting further away from the goal
+        # Penalize the car if it is moving away from the goal
         if dist_to_goal > self.prev_dist_to_goal:
-            distance_penalty = (dist_to_goal - self.prev_dist_to_goal) * 500  # You can adjust the scaling factor
+            distance_penalty = (dist_to_goal - self.prev_dist_to_goal) * 500  # Can adjust the scaling factor
             reward -= distance_penalty
             self.reward_tracking['distance\npenalty'] = -distance_penalty
+
+            # Reward for turning
             turning_reward = abs(action[1]) * 20
-            reward += turning_reward # small reward for turning
+            reward += turning_reward
             self.reward_tracking['turning'] = turning_reward
         else:
             self.reward_tracking['distance\npenalty'] = 0
 
         self.prev_dist_to_goal = dist_to_goal
-        car_pos = car_ob['vector'][:2]
 
-        # TODO examine range of rewards some might be to big or too small!
-        # Observations: the car isn't suffietnly avoiding the boxes.
-        # When car has the clear way to the box it corrctly goes to it
-        # When car has the boxes in the way to the goal it tries to avoid them but not sufficiently.
-        # Reward for turning
-
-        # TODO the model should not be penalized for driving into a green box
-
-        # TODO for avoiding the obtacles we can use the same logic for blue boxes as for green box
-        # Define lower and upper bounds for the green color
-        # Define lower and upper bounds for the blue color
+        # Define the color bounds
         lower_blue = np.array([0, 0, 120])
         upper_blue = np.array([100, 100, 255])
 
-        # TODO add a penalty for being more far away from the goal than previously it should be bigger than turning reward
+        # Create a mask that only contains the blue range
+        mask = cv2.inRange(image, lower_blue, upper_blue)
 
-        # Create a mask that only allows the blue range
-        mask = cv2.inRange(car_ob['image'], lower_blue, upper_blue)
-
-        # Calculate the ratio of blue pixels to total pixels
-        ratio_blue = cv2.countNonZero(mask) / (car_ob['image'].size / 3)
+        # Compute the ratio of blue pixels to the total pixels
+        ratio_blue = cv2.countNonZero(mask) / (image.size / 3)
         reward -= ratio_blue * 50
         self.reward_tracking['blue\npixels'] = -ratio_blue * 60
+
         if ratio_blue > 100:
+            # Small reward for turning
             turning_reward = abs(action[1]) * 100
-            reward += turning_reward # small reward for turning
+            reward += turning_reward
             self.reward_tracking['turning'] = turning_reward
 
         # Add obstacle avoidance reward
         for obstacle in self.obstacles[:-1]:
             obstacle_pos = np.array(obstacle.get_pos())
-            dist_to_obstacle = np.linalg.norm(car_pos - obstacle_pos)
-            # if dist_to_obstacle < 1:
-            reward -= (1 / dist_to_obstacle)*10  # You can adjust the scaling factor if needed
+            dist_to_obstacle = np.linalg.norm(car_pos[:2] - obstacle_pos)
+            reward -= (1 / dist_to_obstacle)*10
             self.reward_tracking['obstacle\navoidance'] = -1 / dist_to_obstacle*10
 
-        # Define lower and upper bounds for the green color
+        # Define color bounds for green
         lower_green = np.array([0, 120, 0])
         upper_green = np.array([100, 255, 100])
 
-        # Create a mask that only allows the green range
-        mask = cv2.inRange(car_ob['image'], lower_green, upper_green)
-        
-        # Calculate the ratio of green pixels to total pixels
-        ratio_green = cv2.countNonZero(mask) / (car_ob['image'].size / 3)
+        # Create a mask that only contains the green range
+        mask = cv2.inRange(image, lower_green, upper_green)
+
+        # Compute the ratio of green pixels to the total pixels
+        ratio_green = cv2.countNonZero(mask) / (image.size / 3)
         reward += ratio_green * 1000
         self.reward_tracking['green\npixels'] = ratio_green * 1000
 
-        # Done by running off the boundaries
-        if (car_ob['vector'][0] >= 15 or car_ob['vector'][0] <= -5 or
-                car_ob['vector'][1] >= 15 or car_ob['vector'][1] <= -5):
-            self.done = True
-            reward = -50
-            self.reward_tracking['boundary\npenalty'] = -50
-        # Done by reaching a goal
+        # Check if episode has ended
+        if (car_pos[0] >= 15 or car_pos[0] <= -5 or car_pos[1] >= 15 or car_pos[1] <= -5):
+            self.done = True  # Episode ends if car is off the boundaries
         elif dist_to_goal < 1:
-            self.done = True
-            reward = 100
-            self.reward_tracking['goal\nreward'] = 100
-        # Done by hitting a box
-        car_id = self.car.get_ids()[0]
-        for obstacle in self.obstacles[:-1]:
-            if p.getContactPoints(car_id, obstacle.get_id(), physicsClientId=self.client):
-                self.done = True
-                reward = -50
-                break
-            self.reward_tracking['collision\npenalty'] = -50 if self.done else 0
+            self.done = True  # Episode ends if car has reached the goal
+        else:
+            # Check for collision with obstacles
+            car_id = self.car.get_ids()[0]
+            for obstacle in self.obstacles[:-1]:
+                if p.getContactPoints(car_id, obstacle.get_id(), physicsClientId=self.client):
+                    self.done = True  # Episode ends if car hits an obstacle
+                    break
 
         self.timestep += 1
-        # print(self.timestep, reward)
-        return car_ob, reward, self.done, dict()
+        return image, reward, self.done, dict()
     
+
     def seed(self, seed=None):
+        """
+        Set the seed for this environment's random number generator.
+
+        Parameters
+        ----------
+        seed : int, optional
+            The seed for the random number generator.
+
+        Returns
+        -------
+        list(int)
+            List of seeds used in this env's random number generators.
+        """
         self.np_random, seed = gym.utils.seeding.np_random(seed)
         return [seed]
 
+
     def reset(self):
+        """
+        Resets the environment to an initial state and returns an initial observation.
+
+        Returns
+        -------
+        np.array
+            The initial observation of the space.
+        """
+        # Reset state variables
         self.done = False
         self.obstacles = []
 
+        # Reset the simulation and set gravity
         p.resetSimulation(self.client)
         p.setGravity(0, 0, -10)
 
         # Reload the plane and car
         Plane(self.client)
 
-        # TODO create a clear way to specify the environment - number of boxes and the seed
-        # seed for environment creation
+        # Reset environment creation seed
         np.random.seed(54)
 
         # Define the locations and dimensions of the buildings
         building_pos = np.random.uniform(low=0, high=10, size=(10, 2))
-        # TODO does whole simulation needs to be reseted or only the position of the goal and the car may be changed
+
+        # Create visual elements for the goal and obstacles
         for b in building_pos[:-1]:
             # Visual element of the goal
             self.obstacles.append(Obstacle(self.client, (b[0], b[1])))
 
-        # omit the seed
+        # Omit the seed
         rg = np.random.default_rng()
 
-        # Generate a new goal position until it is different from all the building positions
+        # Generate a valid position for the goal
         while True:
-            # Generate a new random position for the goal
             self.goal = rg.uniform(low=0, high=10, size=(1, 2))[0].astype(np.float32)
-            # self.goal = np.random.randint(0, 10, size=2)
-
-            if not any(math.sqrt((b_pos[0] - self.goal[0]) ** 2 + 
-                        (b_pos[1] - self.goal[1]) ** 2) <= 1 for b_pos in building_pos):
+            if not any(math.sqrt((b_pos[0] - self.goal[0]) ** 2 + (b_pos[1] - self.goal[1]) ** 2) <= 1 
+                       for b_pos in building_pos):
                 break
 
-        car_pos = (0, 0)
-        # Generate a new car position until it is different from all the building positions
+        # Generate a valid position for the car
         while True:
-            # Generate a new random position for the car
             car_pos = rg.uniform(low=0, high=10, size=(1, 2))[0]
-            # car_pos = np.random.randint(-10, 10, size=2)
-
-            if not any(math.sqrt((b_pos[0] - car_pos[0]) ** 2 +
-                    (b_pos[1] - car_pos[1]) ** 2) <= 1 for b_pos in building_pos):
+            if not any(math.sqrt((b_pos[0] - car_pos[0]) ** 2 + (b_pos[1] - car_pos[1]) ** 2) <= 1 
+                       for b_pos in building_pos):
                 break
 
-        # Compute the angle to the goal
+        # Compute the angle to the goal and create the car with this orientation
         goal_vec = self.goal - car_pos
         goal_angle = np.arctan2(goal_vec[1], goal_vec[0])
-
-        # Create the car with the computed orientation
         self.car = Car(self.client, car_pos, goal_angle)
-
-        # self.car = Car(self.client, car_pos)
 
         # Visual element of the goal
         Goal(self.client, self.goal)
 
-        # Get observation to return
+        # Return the initial observation
         return self.car.get_observation(self.goal)
 
+
     def render(self, mode='human'):        
+        """
+        Render the environment.
+
+        Parameters
+        ----------
+        mode : str, optional
+            The mode to use for rendering.
+
+        """
+        # Initialize the rendered image if it's the first render
         if self.rendered_img is None:
             self.rendered_img = self.axs[0].imshow(np.zeros((100, 100, 4)))
 
         # Base information
         car_id, client_id = self.car.get_ids()
-        proj_matrix = p.computeProjectionMatrixFOV(fov=80, aspect=1,
-                                                   nearVal=0.01, farVal=100)
-        pos, ori = [list(l) for l in
-                    p.getBasePositionAndOrientation(car_id, client_id)]
+        proj_matrix = p.computeProjectionMatrixFOV(fov=80, aspect=1, nearVal=0.01, farVal=100)
+        pos, ori = [list(l) for l in p.getBasePositionAndOrientation(car_id, client_id)]
         pos[2] = 0.2
 
         # Rotate camera direction
@@ -302,8 +310,13 @@ class DrivingEnv(gym.Env):
         self.axs[0].draw_artist(self.rendered_img)
         self.fig.canvas.blit(self.axs[0].bbox)
 
+        # Update reward plots
         self.plot_rewards()
-        plt.pause(0.0001)  # you can adjust this value as needed
+        plt.pause(0.0001)  # Adjust this value as needed
+
 
     def close(self):
+        """
+        Clean up the environment's resources.
+        """
         p.disconnect(self.client)
