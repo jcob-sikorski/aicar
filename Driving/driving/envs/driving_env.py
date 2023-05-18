@@ -10,7 +10,7 @@ from driving.resources.car import Car
 from driving.resources.plane import Plane
 from driving.resources.obstacle import Obstacle
 from driving.resources.goal import Goal
-
+import pygame
 
 class DrivingEnv(gym.Env):
     """
@@ -30,8 +30,8 @@ class DrivingEnv(gym.Env):
             high=np.array([1.5, 135], dtype=np.float32))
 
         # Observation space of the car consists of RGB image
-        img_height = 240
-        img_width = 320
+        img_height = 60
+        img_width = 80
         img_channels = 3
         self.observation_space = Box(low=0, high=255, 
                                      shape=(img_height, img_width, img_channels), 
@@ -71,6 +71,14 @@ class DrivingEnv(gym.Env):
         self.reward_bar = None
         self.reward_types = list(self.reward_tracking.keys())
         self.reward_bar_heights = np.zeros(len(self.reward_types))
+
+        self.image_zeros = np.zeros((100, 100, 4))
+
+        # Initialize Pygame and create a window
+        pygame.init()
+        self.screen_width = 800
+        self.screen_height = 600
+        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
 
 
     def plot_rewards(self):
@@ -122,7 +130,7 @@ class DrivingEnv(gym.Env):
         ang = p.getEulerFromQuaternion(ang)
 
         # Compute the distance to the goal
-        dist_to_goal = math.sqrt(((car_pos[0] - self.goal[0]) ** 2 + (car_pos[1] - self.goal[1]) ** 2))
+        dist_to_goal = np.linalg.norm(self.goal - car_pos[:2])
 
         # Obtain the observation image
         image = self.car.get_observation(self.goal)
@@ -254,14 +262,14 @@ class DrivingEnv(gym.Env):
         # Generate a valid position for the goal
         while True:
             self.goal = rg.uniform(low=0, high=10, size=(1, 2))[0].astype(np.float32)
-            if not any(math.sqrt((b_pos[0] - self.goal[0]) ** 2 + (b_pos[1] - self.goal[1]) ** 2) <= 1 
+            if not any(np.linalg.norm(b_pos - self.goal) <= 1 
                        for b_pos in building_pos):
                 break
 
         # Generate a valid position for the car
         while True:
             car_pos = rg.uniform(low=0, high=10, size=(1, 2))[0]
-            if not any(math.sqrt((b_pos[0] - car_pos[0]) ** 2 + (b_pos[1] - car_pos[1]) ** 2) <= 1 
+            if not any(np.linalg.norm(b_pos - car_pos) <= 1 
                        for b_pos in building_pos):
                 break
 
@@ -280,43 +288,45 @@ class DrivingEnv(gym.Env):
     def render(self, mode='human'):        
         """
         Render the environment.
-
+    
         Parameters
         ----------
         mode : str, optional
             The mode to use for rendering.
-
         """
-        # Initialize the rendered image if it's the first render
-        if self.rendered_img is None:
-            self.rendered_img = self.axs[0].imshow(np.zeros((100, 100, 4)))
-
         # Base information
         car_id, client_id = self.car.get_ids()
         proj_matrix = p.computeProjectionMatrixFOV(fov=80, aspect=1, nearVal=0.01, farVal=100)
         pos, ori = [list(l) for l in p.getBasePositionAndOrientation(car_id, client_id)]
         pos[2] = 0.2
-
+    
         # Rotate camera direction
         rot_mat = np.array(p.getMatrixFromQuaternion(ori)).reshape(3, 3)
         camera_vec = np.matmul(rot_mat, [1, 0, 0])
-        up_vec = np.matmul(rot_mat, np.array([0, 0, 1]))
-        view_matrix = p.computeViewMatrix(pos, pos + camera_vec, up_vec)
-
+        up_vec = np.matmul(rot_mat, np.array([0, 0, 1])) 
+        view_matrix = p.computeViewMatrix(pos, pos + camera_vec, up_vec) 
+    
         # Display image
         frame = p.getCameraImage(100, 100, view_matrix, proj_matrix)[2]
         frame = np.reshape(frame, (100, 100, 4))
-        self.rendered_img.set_data(frame)
-        self.axs[0].draw_artist(self.rendered_img)
-        self.fig.canvas.blit(self.axs[0].bbox)
-
-        # Update reward plots
-        self.plot_rewards()
-        plt.pause(0.0001)  # Adjust this value as needed
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)  # Convert image to RGB format for pygame
+    
+        # Create pygame surface
+        pygame_frame = pygame.image.fromstring(frame.tostring(), frame.shape[:2][::-1], 'RGB')
+    
+        # Scale up the frame to desired size, let's say 500x500 pixels
+        pygame_frame = pygame.transform.scale(pygame_frame, (500, 500))
+    
+        # Assuming self.screen has been initialized with matching size
+        # self.screen = pygame.display.set_mode((500, 500))
+    
+        self.screen.blit(pygame_frame, (0, 0))
+        pygame.display.flip()  # Update the full display surface to the screen
 
 
     def close(self):
         """
         Clean up the environment's resources.
         """
-        p.disconnect(self.client)
+        p.disconnect(self.client) # Disconnect the PyBullet client
+        pygame.quit() # Quit Pygame 

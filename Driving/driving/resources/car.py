@@ -119,8 +119,8 @@ class Car:
                                   (pos[1] - goal[1]) ** 2))
 
         # Define camera parameters
-        width = 320  # Width of the camera image
-        height = 240  # Height of the camera image
+        width = 80  # Width of the camera image
+        height = 60  # Height of the camera image
         fov = 60  # Field of view of the camera
         aspect_ratio = width / height
         near_plane = 0.1  # Near clipping plane
