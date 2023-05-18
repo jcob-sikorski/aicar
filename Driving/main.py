@@ -2,9 +2,11 @@
 import numpy as np
 import driving
 from sb3_contrib import RecurrentPPO
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-# TODO increase performance
+# TODO how to end the episode when car falls off the ground?
+# TODO minimizize pygame window and make the screen the priority in macos
+# TODO model is circling around
+# TODO model is turning only to the left
 
 def main():
     # Initialize a Recurrent Proximal Policy Optimization model with a LSTM Policy
@@ -16,13 +18,13 @@ def main():
         verbose=1,         # Verbosity level for logging
         ent_coef=0.2,      # Entropy coefficient for the loss calculation
         n_steps=256,       # The number of steps to run for each environment per update
-        batch_size=128,
+        batch_size=64,
         learning_rate=0.003, # The learning rate
         seed=42            # Random seed for reproducibility
     )
 
     # Train the model for a specified number of timesteps
-    model.learn(total_timesteps=128)
+    model.learn(total_timesteps=1000)
 
     # Get the environment from the model
     env = model.get_env()
@@ -40,26 +42,29 @@ def main():
     # Reset the environment and get the initial observation
     observation = env.reset()
 
+    timestep = 0
     # Start an infinite loop for playing the game
-    for _ in range(1000):
+    while True:
+        timestep += 1
+        if timestep > 500:
+            timestep = 0
+            env.reset()
+            done = False
+
         # Get the model's action based on the current observation, LSTM state, and episode start signal
         action, lstm_states = model.predict(observation, state=lstm_states, episode_start=episode_starts, deterministic=True)
 
         # Take the action in the environment and get the new observation, reward, done signal, and additional info
-        observation, rewards, dones, info = env.step(action)
-
-        # Update the episode starts signal based on the done signals
-        episode_starts = dones
+        observation, _, done, _ = env.step(action)
 
         # Render the environment
         env.render()
 
         # Check if the episode has ended
-        if episode_starts:
+        if done:
             # Reset the done signal and the episode starts signal
-            dones=False
-            episode_starts=False
-
+            done = False
+            timestep = 0
             # Reset the environment
             env.reset()
 
